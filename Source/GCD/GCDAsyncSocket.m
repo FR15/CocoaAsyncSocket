@@ -29,11 +29,6 @@
 #import <sys/un.h>
 #import <unistd.h>
 
-#if ! __has_feature(objc_arc)
-#warning This file must be compiled with ARC. Use -fobjc-arc flag (or convert project to ARC).
-// For more information see: https://github.com/robbiehanson/CocoaAsyncSocket/wiki/ARC
-#endif
-
 
 #ifndef GCDAsyncSocketLoggingEnabled
 #define GCDAsyncSocketLoggingEnabled 0
@@ -938,10 +933,6 @@ enum GCDAsyncSocketConfig
 		delegate = aDelegate;
 		delegateQueue = dq;
 		
-		#if !OS_OBJECT_USE_OBJC
-		if (dq) dispatch_retain(dq);
-		#endif
-		
 		socket4FD = SOCKET_NULL;
 		socket6FD = SOCKET_NULL;
 		socketUN = SOCKET_NULL;
@@ -984,8 +975,8 @@ enum GCDAsyncSocketConfig
 		// by assigning the value of the ivar to the address of the ivar.
 		// Thus: IsOnSocketQueueOrTargetQueueKey == &IsOnSocketQueueOrTargetQueueKey;
 		
+        //-- 标识 socketQueue
 		IsOnSocketQueueOrTargetQueueKey = &IsOnSocketQueueOrTargetQueueKey;
-		
 		void *nonNullUnusedPointer = (__bridge void *)self;
 		dispatch_queue_set_specific(socketQueue, IsOnSocketQueueOrTargetQueueKey, nonNullUnusedPointer, NULL);
 		
@@ -1021,15 +1012,7 @@ enum GCDAsyncSocketConfig
 	}
 	
 	delegate = nil;
-	
-	#if !OS_OBJECT_USE_OBJC
-	if (delegateQueue) dispatch_release(delegateQueue);
-	#endif
 	delegateQueue = NULL;
-	
-	#if !OS_OBJECT_USE_OBJC
-	if (socketQueue) dispatch_release(socketQueue);
-	#endif
 	socketQueue = NULL;
 	
 	LogInfo(@"%@ - %@ (finish)", THIS_METHOD, self);
@@ -1091,8 +1074,8 @@ enum GCDAsyncSocketConfig
       return;
     }
     
-    socket->flags = kSocketStarted;
-    [socket didConnect:socket->stateIndex];
+    socket->flags = kSocketStarted; // GCDAsyncSocket 初始化完成
+    [socket didConnect:socket->stateIndex]; // stateIndex = 0
   }});
   
   return errorOccured? nil: socket;
@@ -1254,7 +1237,7 @@ enum GCDAsyncSocketConfig
 {
 	[self setDelegate:newDelegate delegateQueue:newDelegateQueue synchronously:YES];
 }
-
+//------------------------------------------------------------ ipv
 - (BOOL)isIPv4Enabled
 {
 	// Note: YES means kIPv4Disabled is OFF
@@ -1368,6 +1351,7 @@ enum GCDAsyncSocketConfig
 	else
 		dispatch_async(socketQueue, block);
 }
+//------------------------------------------------------------ end
 
 - (NSTimeInterval) alternateAddressDelay {
     __block NSTimeInterval delay;
@@ -1666,11 +1650,6 @@ enum GCDAsyncSocketConfig
 			#pragma clang diagnostic push
 			#pragma clang diagnostic warning "-Wimplicit-retain-self"
 				
-				#if !OS_OBJECT_USE_OBJC
-				LogVerbose(@"dispatch_release(accept4Source)");
-				dispatch_release(acceptSource);
-				#endif
-				
 				LogVerbose(@"close(socket4FD)");
 				close(socketFD);
 			
@@ -1712,11 +1691,6 @@ enum GCDAsyncSocketConfig
             dispatch_source_set_cancel_handler(self->accept6Source, ^{
 			#pragma clang diagnostic push
 			#pragma clang diagnostic warning "-Wimplicit-retain-self"
-				
-				#if !OS_OBJECT_USE_OBJC
-				LogVerbose(@"dispatch_release(accept6Source)");
-				dispatch_release(acceptSource);
-				#endif
 				
 				LogVerbose(@"close(socket6FD)");
 				close(socketFD);
@@ -1916,11 +1890,6 @@ enum GCDAsyncSocketConfig
 		}});
 		
         dispatch_source_set_cancel_handler(self->acceptUNSource, ^{
-			
-#if NEEDS_DISPATCH_RETAIN_RELEASE
-			LogVerbose(@"dispatch_release(accept4Source)");
-			dispatch_release(acceptSource);
-#endif
 			
 			LogVerbose(@"close(socket4FD)");
 			close(socketFD);
@@ -2947,13 +2916,13 @@ enum GCDAsyncSocketConfig
 	dispatch_block_t SetupStreamsPart1 = ^{
 		#if TARGET_OS_IPHONE
 		
-		if (![self createReadAndWriteStream])
+		if (![self createReadAndWriteStream]) // 创建 输入输出流
 		{
 			[self closeWithError:[self otherError:@"Error creating CFStreams"]];
 			return;
 		}
 		
-		if (![self registerForStreamCallbacksIncludingReadWrite:NO])
+		if (![self registerForStreamCallbacksIncludingReadWrite:NO]) // 注册事件回调
 		{
 			[self closeWithError:[self otherError:@"Error in CFStreamSetClient"]];
 			return;
@@ -2970,13 +2939,13 @@ enum GCDAsyncSocketConfig
 			return;
 		}
 		
-		if (![self addStreamsToRunLoop])
+		if (![self addStreamsToRunLoop]) // 添加到 runloop
 		{
 			[self closeWithError:[self otherError:@"Error in CFStreamScheduleWithRunLoop"]];
 			return;
 		}
 		
-		if (![self openStreams])
+		if (![self openStreams]) // 打开 流
 		{
 			[self closeWithError:[self otherError:@"Error creating CFStreams"]];
 			return;
@@ -3033,7 +3002,7 @@ enum GCDAsyncSocketConfig
 	
 	// Enable non-blocking IO on the socket
 	
-	int result = fcntl(socketFD, F_SETFL, O_NONBLOCK);
+	int result = fcntl(socketFD, F_SETFL, O_NONBLOCK); // 非阻塞 IO
 	if (result == -1)
 	{
 		NSString *errMsg = @"Error enabling non-blocking IO on socket (fcntl)";
@@ -3044,7 +3013,7 @@ enum GCDAsyncSocketConfig
 	
 	// Setup our read/write sources
 	
-	[self setupReadAndWriteSourcesForNewlyConnectedSocket:socketFD];
+	[self setupReadAndWriteSourcesForNewlyConnectedSocket:socketFD]; // 设置事件处理
 	
 	// Dequeue any pending read/write requests
 	
@@ -3090,19 +3059,6 @@ enum GCDAsyncSocketConfig
 			
 		#pragma clang diagnostic pop
 		}});
-		
-		#if !OS_OBJECT_USE_OBJC
-		dispatch_source_t theConnectTimer = connectTimer;
-		dispatch_source_set_cancel_handler(connectTimer, ^{
-		#pragma clang diagnostic push
-		#pragma clang diagnostic warning "-Wimplicit-retain-self"
-			
-			LogVerbose(@"dispatch_release(connectTimer)");
-			dispatch_release(theConnectTimer);
-			
-		#pragma clang diagnostic pop
-		});
-		#endif
 		
 		dispatch_time_t tt = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC));
 		dispatch_source_set_timer(connectTimer, tt, DISPATCH_TIME_FOREVER, 0);
@@ -4248,21 +4204,11 @@ enum GCDAsyncSocketConfig
 	
 	__block int socketFDRefCount = 2;
 	
-	#if !OS_OBJECT_USE_OBJC
-	dispatch_source_t theReadSource = readSource;
-	dispatch_source_t theWriteSource = writeSource;
-	#endif
-	
 	dispatch_source_set_cancel_handler(readSource, ^{
 	#pragma clang diagnostic push
 	#pragma clang diagnostic warning "-Wimplicit-retain-self"
 		
 		LogVerbose(@"readCancelBlock");
-		
-		#if !OS_OBJECT_USE_OBJC
-		LogVerbose(@"dispatch_release(readSource)");
-		dispatch_release(theReadSource);
-		#endif
 		
 		if (--socketFDRefCount == 0)
 		{
@@ -4278,11 +4224,6 @@ enum GCDAsyncSocketConfig
 	#pragma clang diagnostic warning "-Wimplicit-retain-self"
 		
 		LogVerbose(@"writeCancelBlock");
-		
-		#if !OS_OBJECT_USE_OBJC
-		LogVerbose(@"dispatch_release(writeSource)");
-		dispatch_release(theWriteSource);
-		#endif
 		
 		if (--socketFDRefCount == 0)
 		{
@@ -5751,19 +5692,6 @@ enum GCDAsyncSocketConfig
 		#pragma clang diagnostic pop
 		}});
 		
-		#if !OS_OBJECT_USE_OBJC
-		dispatch_source_t theReadTimer = readTimer;
-		dispatch_source_set_cancel_handler(readTimer, ^{
-		#pragma clang diagnostic push
-		#pragma clang diagnostic warning "-Wimplicit-retain-self"
-			
-			LogVerbose(@"dispatch_release(readTimer)");
-			dispatch_release(theReadTimer);
-			
-		#pragma clang diagnostic pop
-		});
-		#endif
-		
 		dispatch_time_t tt = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC));
 		
 		dispatch_source_set_timer(readTimer, tt, DISPATCH_TIME_FOREVER, 0);
@@ -6393,19 +6321,6 @@ enum GCDAsyncSocketConfig
 			
 		#pragma clang diagnostic pop
 		}});
-		
-		#if !OS_OBJECT_USE_OBJC
-		dispatch_source_t theWriteTimer = writeTimer;
-		dispatch_source_set_cancel_handler(writeTimer, ^{
-		#pragma clang diagnostic push
-		#pragma clang diagnostic warning "-Wimplicit-retain-self"
-			
-			LogVerbose(@"dispatch_release(writeTimer)");
-			dispatch_release(theWriteTimer);
-			
-		#pragma clang diagnostic pop
-		});
-		#endif
 		
 		dispatch_time_t tt = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * NSEC_PER_SEC));
 		
@@ -7768,7 +7683,7 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 	}
 	
 }
-
+/// 创建并配置 socket IO 流
 - (BOOL)createReadAndWriteStream
 {
 	LogTrace();
@@ -7798,6 +7713,7 @@ static void CFWriteStreamCallback (CFWriteStreamRef stream, CFStreamEventType ty
 	
 	LogVerbose(@"Creating read and write stream...");
 	
+    //-- 创建IO流并绑定 socket
 	CFStreamCreatePairWithSocket(NULL, (CFSocketNativeHandle)socketFD, &readStream, &writeStream);
 	
 	// The kCFStreamPropertyShouldCloseNativeSocket property should be false by default (for our case).
